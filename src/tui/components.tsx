@@ -1,12 +1,11 @@
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { RGBA } from "@opentui/core"
 import { createSignal, For, Match, Show, Switch } from "solid-js"
 import type { BalanceTrackedProvider, SessionCostSummary } from "../pricing.js"
 import { PLUGIN_NAME } from "../version.js"
 import { formatDetails, formatMoney, formatTime, formatTokens } from "./format.js"
 import { balanceTone, type BalanceState } from "./state.js"
+import type { Theme } from "./theme.js"
 
-type Theme = TuiPluginApi["theme"]["current"]
 
 export function Header(props: { theme: Theme; canRefresh: boolean; onRefresh: () => void }) {
   const [hovered, setHovered] = createSignal(false)

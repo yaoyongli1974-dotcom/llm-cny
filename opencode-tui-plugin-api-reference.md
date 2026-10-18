@@ -1,3 +1,7 @@
+> **注意**：本文档整理的是 OpenCode 1.19 的 TUI 插件 API（`@opencode-ai/plugin/tui` 的 `{ id, tui }`）。
+> 本项目已移植到 OpenCode 2：入口改为 `@opencode/plugin/tui` 的 `Plugin.define({ id, setup(ctx) })`，
+> 数据改用 `ctx.data`、插槽改用 `ctx.ui.slot`、主题改用 `ctx.theme`。V2 文档见 https://opencode.ai/v2/docs/build/plugins/cli 。
+
 # OpenCode TUI 插件接口速查
 
 > 面向写代码的 LLM / Agent 使用。目标是让实现 TUI 插件时不用反复翻源码。

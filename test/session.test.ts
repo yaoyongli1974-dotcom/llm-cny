@@ -1,4 +1,4 @@
-import type { Message } from "@opencode-ai/sdk/v2"
+import type { SessionMessageInfo } from "@opencode/client"
 import { expect, test } from "bun:test"
 import {
   activeTrackedProviders,
@@ -11,22 +11,24 @@ function assistantMessage(input: {
   providerID: string
   modelID: string
   completed?: number
-}): Message {
+}): SessionMessageInfo {
   return {
     id: `${input.providerID}-${input.modelID}`,
-    role: "assistant",
-    providerID: input.providerID,
-    modelID: input.modelID,
-    time: input.completed === undefined ? {} : { completed: input.completed },
-  } as Message
+    type: "assistant",
+    agent: "build",
+    model: { providerID: input.providerID, id: input.modelID },
+    content: [],
+    time: input.completed === undefined ? { created: 0 } : { created: 0, completed: input.completed },
+  } as SessionMessageInfo
 }
 
-function userMessage(input: { providerID: string }): Message {
+function modelSelected(input: { providerID: string }): SessionMessageInfo {
   return {
-    id: `user-${input.providerID}`,
-    role: "user",
-    model: { providerID: input.providerID, modelID: "m" },
-  } as Message
+    id: `model-${input.providerID}`,
+    type: "model-switched",
+    time: { created: 0 },
+    model: { providerID: input.providerID, id: "m" },
+  } as SessionMessageInfo
 }
 
 test("流式中的受支持回复不会激活 provider", () => {
@@ -91,7 +93,7 @@ test("OpenAI API Key 模式不会激活 Codex 面板", () => {
     hasOpenAIOAuthProvider([
       {
         id: "openai",
-        key: "sk-test",
+        settings: { apiKey: "sk-test" },
       },
     ]),
   ).toBe(false)
@@ -102,7 +104,7 @@ test("OpenAI API Key 模式会启用 OpenAI 价格统计", () => {
     hasOpenAIApiKeyProvider([
       {
         id: "openai",
-        key: "sk-test",
+        settings: { apiKey: "sk-test" },
       },
     ]),
   ).toBe(true)
@@ -133,7 +135,7 @@ test("没有 Copilot 对话时不检测到 Copilot 额度", () => {
   expect(
     hasCopilotUsage([
       assistantMessage({ providerID: "openai", modelID: "gpt-4o", completed: 1 }),
-      userMessage({ providerID: "openai" }),
+      modelSelected({ providerID: "openai" }),
     ]),
   ).toBe(false)
 })
@@ -146,8 +148,8 @@ test("Copilot 助手回复会激活 Copilot 额度检测", () => {
   ).toBe(true)
 })
 
-test("用户消息携带 Copilot provider 也会激活", () => {
+test("用户切换到 Copilot 模型也会激活", () => {
   expect(
-    hasCopilotUsage([userMessage({ providerID: "github-copilot" })]),
+    hasCopilotUsage([modelSelected({ providerID: "github-copilot" })]),
   ).toBe(true)
 })

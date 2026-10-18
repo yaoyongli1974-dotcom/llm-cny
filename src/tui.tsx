@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
-import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import type { Message } from "@opencode-ai/sdk/v2"
+import type { SessionMessageInfo } from "@opencode/client"
+import { Plugin } from "@opencode/plugin/tui"
+import type { Context } from "@opencode/plugin/tui/context"
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { fetchDisplayBalance } from "./balance.js"
 import { fetchCopilotUsage, type CopilotQuota } from "./copilot-usage.js"
@@ -30,14 +31,15 @@ import {
   hasOpenAIApiKeyProvider,
   hasOpenAIOAuthProvider,
   hasOpenAIUsage,
-  isSubagentSession,
   mergeMessages,
   providerTokens,
   taskChildSessionIDs,
   usageRecords,
 } from "./tui/session.js"
+import { defaultStateDir } from "./tui/paths.js"
 import { tokenSignature, type BalanceState, type BalanceStateMap } from "./tui/state.js"
-import { PLUGIN_NAME, PLUGIN_VERSION } from "./version.js"
+import { themeFrom } from "./tui/theme.js"
+import { isNewerVersion, PLUGIN_NAME, PLUGIN_VERSION } from "./version.js"
 
 type CodexState =
   | { status: "idle" | "loading" }
@@ -56,31 +58,32 @@ type CopilotState =
 const pluginID = "opencode-tui-deepseek-cny"
 let versionCheckDone = false
 
-function View(props: { api: TuiPluginApi; options: Options; session_id: string }) {
-  const theme = () => props.api.theme.current
+function View(props: { ctx: Context; options: Options; session_id: string }) {
+  const theme = createMemo(() => themeFrom(props.ctx.theme))
+  const providers = createMemo(() => props.ctx.data.location.provider.list(props.ctx.location) ?? [])
   const [balances, setBalances] = createSignal<BalanceStateMap>({})
-  const [remoteChildMessages, setRemoteChildMessages] = createSignal<ReadonlyArray<Message>>([])
-  const session = createMemo(() => props.api.state.session.get(props.session_id))
-  const messages = createMemo(() => props.api.state.session.messages(props.session_id))
-  const localChildSessionIDs = createMemo(() => taskChildSessionIDs(props.api, messages()))
+  const [remoteChildMessages, setRemoteChildMessages] = createSignal<ReadonlyArray<SessionMessageInfo>>([])
+  const session = createMemo(() => props.ctx.data.session.get(props.session_id))
+  const messages = createMemo(() => props.ctx.data.session.message.list(props.session_id))
+  const localChildSessionIDs = createMemo(() => taskChildSessionIDs(messages()))
   const localChildMessages = createMemo(() =>
-    localChildSessionIDs().flatMap((sessionID) => props.api.state.session.messages(sessionID)),
+    localChildSessionIDs().flatMap((sessionID) => props.ctx.data.session.message.list(sessionID)),
   )
   const usageMessages = createMemo(() => mergeMessages(messages(), localChildMessages(), remoteChildMessages()))
-  const openAIApiKeyEnabled = createMemo(() => hasOpenAIApiKeyProvider(props.api.state.provider, props.api.state.config))
+  const openAIApiKeyEnabled = createMemo(() => hasOpenAIApiKeyProvider(providers()))
   const costMessages = createMemo(() =>
-    openAIApiKeyEnabled() ? usageMessages() : usageMessages().filter((item) => item.role !== "assistant" || item.providerID !== "openai"),
+    openAIApiKeyEnabled() ? usageMessages() : usageMessages().filter((item) => item.type !== "assistant" || item.model.providerID !== "openai"),
   )
-  const tokens = createMemo(() => providerTokens(props.api))
+  const tokens = createMemo(() => providerTokens(providers()))
   const activeProviders = createMemo(() => activeTrackedProviders(costMessages()))
   const activeBalanceProviders = createMemo(() => activeProviders().filter(supportsBalance))
   const hasTrackedUsage = createMemo(() => activeProviders().length > 0)
   const needsUsdCnyRate = createMemo(() =>
     activeProviders().some((item) => item.id === "openrouter" || item.id === "xai" || item.id === "anthropic" || item.id === "openai" || item.id === "google" || item.id === "google-vertex"),
   )
-  const codexEnabled = createMemo(() => hasOpenAIOAuthProvider(props.api.state.provider) && hasOpenAIUsage(usageMessages()))
+  const codexEnabled = createMemo(() => hasOpenAIOAuthProvider(providers()) && hasOpenAIUsage(usageMessages()))
   const copilotEnabled = createMemo(
-    () => hasCopilotOAuthProvider(props.api.state.provider) && hasCopilotUsage(usageMessages()),
+    () => hasCopilotOAuthProvider(providers()) && hasCopilotUsage(usageMessages()),
   )
   const activated = createMemo(() => hasTrackedUsage() || codexEnabled() || copilotEnabled())
   const completedTrackedReplies = createMemo(() => completedTrackedReplyKey(costMessages()))
@@ -156,12 +159,9 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
   const refreshChildUsage = async () => {
     const request = ++childUsageRequest
     try {
-      const children = await props.api.client.session.children({ sessionID: props.session_id })
-      if (request !== childUsageRequest) return
-
       const ids = new Set<string>(localChildSessionIDs())
-      for (const child of children.data ?? []) {
-        if (isSubagentSession(child)) ids.add(child.id)
+      for (const child of props.ctx.data.session.list()) {
+        if (child.parentID === props.session_id) ids.add(child.id)
       }
 
       if (ids.size === 0) {
@@ -170,11 +170,11 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
       }
 
       const responses = await Promise.all(
-        [...ids].map((sessionID) => props.api.client.session.messages({ sessionID })),
+        [...ids].map((sessionID) => props.ctx.client.message.list({ sessionID })),
       )
       if (request !== childUsageRequest) return
 
-      setRemoteChildMessages(responses.flatMap((response) => (response.data ?? []).map((item) => item.info)))
+      setRemoteChildMessages(responses.flatMap((response) => response.data))
     } catch {
       if (request === childUsageRequest) setRemoteChildMessages([])
     }
@@ -227,7 +227,7 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
     const request = ++codexRequest
     setCodexState((prev) => (prev.status === "ready" ? prev : { status: "loading" }))
     try {
-      const stateDir = props.api.state.path.state
+      const stateDir = defaultStateDir()
       const result = await fetchCodexUsage(stateDir)
       if (disposed || request !== codexRequest) return
       if (result.ok) {
@@ -269,7 +269,7 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
     const request = ++copilotRequest
     setCopilotState((prev) => (prev.status === "ready" ? prev : { status: "loading" }))
     try {
-      const stateDir = props.api.state.path.state
+      const stateDir = defaultStateDir()
       const result = await fetchCopilotUsage(stateDir)
       if (disposed || request !== copilotRequest) return
       if (result.ok) {
@@ -350,7 +350,7 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
 
     if (!versionCheckDone) {
       versionCheckDone = true
-      void checkLatestVersion(props.api, setUpdateVersion)
+      void checkLatestVersion(props.ctx, setUpdateVersion)
     }
   })
 
@@ -378,7 +378,7 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
         gap={1}
       >
         <Header
-          theme={props.api.theme.current}
+          theme={theme()}
           canRefresh={
             (hasTrackedUsage() && activeBalanceProviders().some((item) => tokens()[item.id] !== undefined)) ||
             codexEnabled() ||
@@ -395,36 +395,36 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
         <Show when={showableUpdateVersion()}>
           {(version) => (
             <UpdateBanner
-              theme={props.api.theme.current}
+              theme={theme()}
               version={version()}
               activated={activated()}
               onDismiss={activated() ? dismissUpdateBanner : undefined}
             />
           )}
         </Show>
-        <Show when={activated()} fallback={<ActivationPrompt theme={props.api.theme.current} />}>
+        <Show when={activated()} fallback={<ActivationPrompt theme={theme()} />}>
           <Show when={hasTrackedUsage()}>
-            <Show when={summary().turns > 0} fallback={<EmptyUsage theme={props.api.theme.current} />}>
-              <Summary theme={props.api.theme.current} summary={summary()} title={session()?.title} />
+            <Show when={summary().turns > 0} fallback={<EmptyUsage theme={theme()} />}>
+              <Summary theme={theme()} summary={summary()} title={session()?.title} />
             </Show>
-            <Divider theme={props.api.theme.current} />
+            <Divider theme={theme()} />
           </Show>
           <Show when={codexEnabled()}>
-            <CodexUsagePanel theme={props.api.theme.current} state={codexState()} />
+            <CodexUsagePanel theme={theme()} state={codexState()} />
             <Show when={hasTrackedUsage() || copilotEnabled()}>
-              <Divider theme={props.api.theme.current} />
+              <Divider theme={theme()} />
             </Show>
           </Show>
           <Show when={copilotEnabled()}>
-            <CopilotQuotaPanel theme={props.api.theme.current} state={copilotState()} />
+            <CopilotQuotaPanel theme={theme()} state={copilotState()} />
             <Show when={hasTrackedUsage()}>
-              <Divider theme={props.api.theme.current} />
+              <Divider theme={theme()} />
             </Show>
           </Show>
           <For each={activeBalanceProviders()}>
             {(provider) => (
               <ProviderBalance
-                theme={props.api.theme.current}
+                theme={theme()}
                 provider={provider}
                 state={balances()[provider.id] ?? { status: "idle" }}
               />
@@ -436,15 +436,15 @@ function View(props: { api: TuiPluginApi; options: Options; session_id: string }
   )
 }
 
-async function checkLatestVersion(api: TuiPluginApi, setUpdateVersion: (version: string) => void) {
+async function checkLatestVersion(ctx: Context, setUpdateVersion: (version: string) => void) {
   try {
     const res = await fetch(`https://registry.npmjs.org/${PLUGIN_NAME}`)
     if (!res.ok) return
     const data = (await res.json()) as { ["dist-tags"]?: { latest?: string } }
     const latest = data["dist-tags"]?.latest
-    if (latest && latest !== PLUGIN_VERSION) {
+    if (latest && isNewerVersion(latest, PLUGIN_VERSION)) {
       setUpdateVersion(latest)
-      await api.attention.notify({
+      await ctx.attention.notify({
         title: "LLM CNY 有新版本",
         message: `发现 ${PLUGIN_NAME} ${latest}，运行 opencode plugin ${PLUGIN_NAME}@${latest} --force 更新`,
         notification: { when: "always" },
@@ -455,22 +455,13 @@ async function checkLatestVersion(api: TuiPluginApi, setUpdateVersion: (version:
   }
 }
 
-const tui: TuiPlugin = async (api, options) => {
-  const config = parseOptions(options)
-
-  api.slots.register({
-    order: 150,
-    slots: {
-      sidebar_content(_ctx, props) {
-        return <View api={api} options={config} session_id={props.session_id} />
-      },
-    },
-  })
-}
-
-const plugin: TuiPluginModule & { id: string } = {
+export default Plugin.define({
   id: pluginID,
-  tui,
-}
-
-export default plugin
+  setup(ctx) {
+    const options = parseOptions(ctx.options)
+    return ctx.ui.slot({
+      append: "sidebar.content",
+      render: ({ sessionID }) => <View ctx={ctx} options={options} session_id={sessionID} />,
+    })
+  },
+})

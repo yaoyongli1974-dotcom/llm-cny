@@ -1,10 +1,9 @@
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { RGBA } from "@opentui/core"
 import { Match, Show, Switch } from "solid-js"
 import type { CodexUsage, WindowLimit } from "../codex-usage.js"
 import { formatWindowLabel } from "./codex-format.js"
+import type { Theme } from "./theme.js"
 
-type Theme = TuiPluginApi["theme"]["current"]
 
 const BAR_WIDTH = 20
 const FILL_CHAR = "█"

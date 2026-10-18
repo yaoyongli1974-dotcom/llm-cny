@@ -85,23 +85,32 @@ Anthropic 和 OpenAI API 价格单位同样为美元 / 百万 tokens，并复用
 
 ## 安装
 
+需要 OpenCode 2.0+（V2 CLI 插件 API）。
+
 ```bash
-opencode plugin llm-cny
+opencode plugin add llm-cny
 ```
 
-或在 `.opencode/tui.jsonc` 中手动添加：
+插件是 CLI-only 的，会写入全局 `cli.json`：
 
-```jsonc
+```json
 {
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": [
-    [
-      "llm-cny",
-      {
+  "plugins": ["llm-cny"]
+}
+```
+
+需要传选项时使用对象形式：
+
+```json
+{
+  "plugins": [
+    {
+      "package": "llm-cny",
+      "options": {
         "balanceRefreshMs": 600000,
         "showWhenEmpty": true
       }
-    ]
+    }
   ]
 }
 ```
@@ -115,13 +124,13 @@ bun run typecheck
 bun run build
 ```
 
-本地调试时可以把插件入口写进 `.opencode/tui.jsonc`：
+本地调试时，在 `~/.config/opencode/plugins/llm-cny/tui.ts`（或项目 `.opencode/plugins/llm-cny/tui.ts`）放一个转发文件指向构建产物：
 
-```jsonc
-{
-  "plugin": ["./llm-cny/src/tui.tsx"]
-}
+```ts
+export { default } from "/绝对路径/llm-cny/dist/tui.js"
 ```
+
+也可以让 `cli.json` 的 `plugins` 指向一个只包含 `tui.ts` 的本地目录。注意不要同时放 `index.ts`，否则 OpenCode 会把该目录当作服务端插件加载。
 
 ## 配置
 

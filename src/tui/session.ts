@@ -1,25 +1,27 @@
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
-import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
+import type { SessionInfo, SessionMessageAssistant, SessionMessageInfo } from "@opencode/client"
 import { BALANCE_TRACKED_PROVIDERS, TRACKED_PROVIDERS, trackedModel, type BalanceProviderID, type TrackedProviderID } from "../pricing.js"
 import { isRecord } from "../utils.js"
 
-type ProviderAuthLike = {
+/** The subset of `ProviderInfo` this plugin reads. */
+export type ProviderInfoLike = {
   id: string
-  source?: string
-  key?: string | null | undefined
-  env?: readonly string[]
-  options?: unknown
+  settings?: unknown
 }
 
-export function providerTokens(api: TuiPluginApi) {
+const PROVIDER_ENV: Record<string, readonly string[]> = {
+  openai: ["OPENAI_API_KEY"],
+  "github-copilot": ["GITHUB_TOKEN", "GH_TOKEN"],
+}
+
+export function providerTokens(providers: ReadonlyArray<ProviderInfoLike>, config?: unknown) {
   const result: Partial<Record<BalanceProviderID, string>> = {}
   for (const provider of BALANCE_TRACKED_PROVIDERS) {
-    result[provider.id] = findProviderApiKey(api, provider)
+    result[provider.id] = findProviderApiKey(providers, config, provider)
   }
   return result
 }
 
-export function activeTrackedProviders(messages: ReadonlyArray<Message>) {
+export function activeTrackedProviders(messages: ReadonlyArray<SessionMessageInfo>) {
   const ids = new Set<TrackedProviderID>()
   for (const item of messages) {
     const model = completedTrackedModel(item)
@@ -28,71 +30,59 @@ export function activeTrackedProviders(messages: ReadonlyArray<Message>) {
   return TRACKED_PROVIDERS.filter((item) => ids.has(item.id))
 }
 
-export function hasOpenAIOAuthProvider(
-  providers: ReadonlyArray<ProviderAuthLike>,
-) {
+export function hasOpenAIOAuthProvider(providers: ReadonlyArray<ProviderInfoLike>) {
   const openai = providers.find((item) => item.id === "openai")
   if (!openai) return false
-  if (hasOpenAIProviderApiKey(openai)) return false
-  return true
+  return !hasProviderApiKey(openai)
 }
 
-export function hasCopilotOAuthProvider(
-  providers: ReadonlyArray<ProviderAuthLike>,
-) {
+export function hasCopilotOAuthProvider(providers: ReadonlyArray<ProviderInfoLike>) {
   const copilot = providers.find((item) => item.id === "github-copilot")
   if (!copilot) return false
-  if (hasProviderApiKey(copilot)) return false
-  return true
+  return !hasProviderApiKey(copilot)
 }
 
-function hasProviderApiKey(provider: ProviderAuthLike) {
+function hasProviderApiKey(provider: ProviderInfoLike) {
   const candidates = [
-    provider.key,
-    readString(provider.options, "apiKey"),
-    ...(provider.env?.map((name) => process.env[name]) ?? []),
+    readString(provider.settings, "apiKey"),
+    ...(PROVIDER_ENV[provider.id] ?? []).map((name) => process.env[name]),
   ]
   return candidates.some((item) => typeof item === "string" && item.trim() !== "")
 }
 
-export function hasOpenAIApiKeyProvider(providers: ReadonlyArray<ProviderAuthLike>, config?: unknown) {
+export function hasOpenAIApiKeyProvider(providers: ReadonlyArray<ProviderInfoLike>, config?: unknown) {
   const openai = providers.find((item) => item.id === "openai")
-  if (openai && hasOpenAIProviderApiKey(openai)) return true
+  if (openai && hasProviderApiKey(openai)) return true
   const configApiKey = readProviderConfigString(config, "openai", "apiKey")
   return typeof configApiKey === "string" && configApiKey.trim() !== ""
 }
 
-export function hasOpenAIUsage(messages: ReadonlyArray<Message>) {
-  return messages.some((item) => {
-    if (item.role === "user") return item.model.providerID.toLowerCase() === "openai"
-    return item.providerID.toLowerCase() === "openai"
-  })
+export function hasOpenAIUsage(messages: ReadonlyArray<SessionMessageInfo>) {
+  return messages.some((item) => modelRefOf(item)?.providerID.toLowerCase() === "openai")
 }
 
-export function hasCopilotUsage(messages: ReadonlyArray<Message>) {
-  return messages.some((item) => {
-    if (item.role === "user") return item.model.providerID.toLowerCase() === "github-copilot"
-    return item.providerID.toLowerCase() === "github-copilot"
-  })
+export function hasCopilotUsage(messages: ReadonlyArray<SessionMessageInfo>) {
+  return messages.some((item) => modelRefOf(item)?.providerID.toLowerCase() === "github-copilot")
 }
 
-export function completedTrackedReplyKey(messages: ReadonlyArray<Message>) {
+export function completedTrackedReplyKey(messages: ReadonlyArray<SessionMessageInfo>) {
   return messages
     .flatMap((item) => {
-      if (item.role !== "assistant") return []
+      if (item.type !== "assistant") return []
       if (!completedTrackedModel(item)) return []
       return [`${item.id}:${item.time.completed}`]
     })
     .join("|")
 }
 
-export function usageRecords(messages: ReadonlyArray<Message>) {
+export function usageRecords(messages: ReadonlyArray<SessionMessageInfo>) {
   return messages.flatMap((item) => {
-    if (item.role !== "assistant") return []
+    if (item.type !== "assistant") return []
+    if (!item.tokens) return []
     return [
       {
-        providerID: item.providerID.toLowerCase(),
-        modelID: item.modelID.toLowerCase(),
+        providerID: item.model.providerID.toLowerCase(),
+        modelID: item.model.id.toLowerCase(),
         time: item.time,
         tokens: item.tokens,
       },
@@ -102,33 +92,34 @@ export function usageRecords(messages: ReadonlyArray<Message>) {
 
 export function childUsageRefreshKey(input: {
   sessionID: string
-  session?: Session
+  session?: SessionInfo
   localChildSessionIDs: ReadonlyArray<string>
-  messages: ReadonlyArray<Message>
+  messages: ReadonlyArray<SessionMessageInfo>
 }) {
   return [
     input.sessionID,
     input.session?.time.updated ?? "",
     input.localChildSessionIDs.join(","),
     input.messages
-      .map((item) => `${item.id}:${item.role === "assistant" ? (item.time.completed ?? "") : ""}`)
+      .map((item) => `${item.id}:${item.type === "assistant" ? (item.time.completed ?? "") : ""}`)
       .join("|"),
   ].join("|")
 }
 
-export function taskChildSessionIDs(api: TuiPluginApi, messages: ReadonlyArray<Message>) {
+export function taskChildSessionIDs(messages: ReadonlyArray<SessionMessageInfo>) {
   const result = new Set<string>()
   for (const message of messages) {
-    for (const part of api.state.part(message.id)) {
-      const sessionID = taskChildSessionID(part)
+    if (message.type !== "assistant") continue
+    for (const content of message.content) {
+      const sessionID = taskChildSessionID(content)
       if (sessionID) result.add(sessionID)
     }
   }
   return [...result].sort()
 }
 
-export function mergeMessages(...groups: ReadonlyArray<ReadonlyArray<Message>>) {
-  const result = new Map<string, Message>()
+export function mergeMessages(...groups: ReadonlyArray<ReadonlyArray<SessionMessageInfo>>) {
+  const result = new Map<string, SessionMessageInfo>()
   for (const group of groups) {
     for (const message of group) {
       result.set(message.id, message)
@@ -137,18 +128,20 @@ export function mergeMessages(...groups: ReadonlyArray<ReadonlyArray<Message>>) 
   return [...result.values()]
 }
 
-export function isSubagentSession(session: Session) {
-  return session.title.includes(" subagent)")
+export function isSubagentSession(session: SessionInfo) {
+  return session.parentID !== undefined
 }
 
-function findProviderApiKey(api: TuiPluginApi, tracked: (typeof BALANCE_TRACKED_PROVIDERS)[number]) {
-  const provider = api.state.provider.find((item) => item.id === tracked.id)
+function findProviderApiKey(
+  providers: ReadonlyArray<ProviderInfoLike>,
+  config: unknown,
+  tracked: (typeof BALANCE_TRACKED_PROVIDERS)[number],
+) {
+  const provider = providers.find((item) => item.id === tracked.id)
   const fromProvider = [
-    provider?.key,
-    readString(provider?.options, "apiKey"),
-    ...(provider?.env.map((name) => process.env[name]) ?? []),
+    readString(provider?.settings, "apiKey"),
     ...tracked.env.map((name) => process.env[name]),
-    readProviderConfigApiKey(api.state.config, tracked.id),
+    readProviderConfigApiKey(config, tracked.id),
   ].find((item) => typeof item === "string" && item.trim() !== "")
 
   return fromProvider?.trim()
@@ -167,8 +160,8 @@ function readProviderConfigString(config: unknown, providerID: string, key: stri
   return readString(provider.options, key)
 }
 
-function taskChildSessionID(part: Part) {
-  if (part.type !== "tool" || part.tool !== "task") return undefined
+function taskChildSessionID(part: SessionMessageAssistant["content"][number]) {
+  if (part.type !== "tool" || part.name !== "task") return undefined
   const metadata = "metadata" in part.state ? part.state.metadata : undefined
   return readString(metadata, "sessionId")
 }
@@ -178,18 +171,13 @@ function readString(value: unknown, key: string) {
   return typeof value[key] === "string" ? value[key] : undefined
 }
 
-function hasOpenAIProviderApiKey(provider: ProviderAuthLike) {
-  const candidates = [
-    provider.key,
-    readString(provider.options, "apiKey"),
-    ...(provider.env?.map((name) => process.env[name]) ?? []),
-  ]
-
-  return candidates.some((item) => typeof item === "string" && item.trim() !== "")
+function modelRefOf(message: SessionMessageInfo) {
+  if (message.type === "assistant" || message.type === "model-switched") return message.model
+  return undefined
 }
 
-function completedTrackedModel(message: Message) {
-  if (message.role !== "assistant") return undefined
-  if (!("completed" in message.time) || message.time.completed === undefined) return undefined
-  return trackedModel(message.providerID.toLowerCase(), message.modelID.toLowerCase())
+function completedTrackedModel(message: SessionMessageInfo) {
+  if (message.type !== "assistant") return undefined
+  if (message.time.completed === undefined) return undefined
+  return trackedModel(message.model.providerID.toLowerCase(), message.model.id.toLowerCase())
 }

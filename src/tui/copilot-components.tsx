@@ -1,12 +1,11 @@
 /** @jsxImportSource @opentui/solid */
-import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { RGBA } from "@opentui/core"
 import { For, Match, Show, Switch } from "solid-js"
 import type { CopilotQuota } from "../copilot-usage.js"
 import { formatResetDate, formatSnapshot, quotaOrder } from "./copilot-format.js"
 import { resolveDisplayPlan } from "../copilot-usage.js"
+import type { Theme } from "./theme.js"
 
-type Theme = TuiPluginApi["theme"]["current"]
 
 type CopilotState =
   | { status: "idle" | "loading" }
