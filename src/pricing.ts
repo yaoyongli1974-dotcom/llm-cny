@@ -90,7 +90,7 @@ export function trackedModel(providerID: string, modelID: string) {
 }
 
 export function priceForModel(modelID: TrackedModelID, time = Date.now(), inputTokens = 0, options: PricingOptions = {}): Price {
-  if (modelID === "deepseek-v4-flash") return flashPrice
+  if (modelID === "deepseek-v4-flash" || modelID === "deepseek-flash") return flashPrice
   if (modelID === "deepseek-v4-pro") return DEEPSEEK_ENTRIES[1]!.priceFor(time, inputTokens, options)
   if (modelID === "kimi-k2.5") return kimiK25Price
   if (modelID === "kimi-k2.6") return kimiK26Price

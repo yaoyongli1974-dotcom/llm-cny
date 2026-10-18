@@ -54,6 +54,30 @@ test("完成后的受支持回复会激活 provider", () => {
   expect(providers.map((item) => item.id)).toEqual(["deepseek"])
 })
 
+test("OpenCode 实际暴露的 deepseek-flash 模型 ID 也会激活 provider", () => {
+  const providers = activeTrackedProviders([
+    assistantMessage({
+      providerID: "deepseek",
+      modelID: "deepseek-flash",
+      completed: 1,
+    }),
+  ])
+
+  expect(providers.map((item) => item.id)).toEqual(["deepseek"])
+})
+
+test("OpenCode Zen 的免费模型 deepseek-v4.1-flash-free 也会激活 provider", () => {
+  const providers = activeTrackedProviders([
+    assistantMessage({
+      providerID: "opencode",
+      modelID: "deepseek-v4.1-flash-free",
+      completed: 1,
+    }),
+  ])
+
+  expect(providers.map((item) => item.id)).toEqual(["opencode"])
+})
+
 test("完成后的 Xiaomi MiMo 回复会激活 provider", () => {
   const providers = activeTrackedProviders([
     assistantMessage({

@@ -29,4 +29,13 @@ export const DEEPSEEK_ENTRIES: readonly ModelPriceEntry[] = [
     modelLabel: "V4 Pro",
     priceFor: () => proPrice,
   },
+  // OpenCode 的 deepseek provider 把 V4 Flash 暴露为 `deepseek-flash`（旧 ID 才是 `deepseek-v4-flash`），
+  // 这里补一条别名，否则该模型的会话不会被识别，侧栏一直停在激活提示。
+  {
+    providerID: "deepseek",
+    providerLabel: "DeepSeek",
+    modelID: "deepseek-flash",
+    modelLabel: "V4 Flash",
+    priceFor: () => flashPrice,
+  },
 ]

@@ -23,6 +23,50 @@ test("按 DeepSeek V4 Flash 人民币价格统计", () => {
   expect(summary.models[0]?.cacheMissInputTokens).toBe(1_000_000)
 })
 
+test("OpenCode 暴露的 deepseek-flash 模型 ID 按 DeepSeek V4 Flash 价格统计", () => {
+  const summary = calculateTrackedSession([
+    {
+      providerID: "deepseek",
+      modelID: "deepseek-flash",
+      tokens: {
+        input: 1_000_000,
+        output: 1_000_000,
+        reasoning: 0,
+        cache: {
+          read: 1_000_000,
+          write: 0,
+        },
+      },
+    },
+  ])
+
+  expect(summary.turns).toBe(1)
+  expect(summary.costCny).toBe(3.02)
+  expect(summary.models[0]?.providerLabel).toBe("DeepSeek")
+})
+
+test("OpenCode Zen 免费模型 deepseek-v4.1-flash-free 成本为 0", () => {
+  const summary = calculateTrackedSession([
+    {
+      providerID: "opencode",
+      modelID: "deepseek-v4.1-flash-free",
+      tokens: {
+        input: 1_000_000,
+        output: 1_000_000,
+        reasoning: 100,
+        cache: {
+          read: 1_000_000,
+          write: 0,
+        },
+      },
+    },
+  ])
+
+  expect(summary.turns).toBe(1)
+  expect(summary.costCny).toBe(0)
+  expect(summary.models[0]?.modelID).toBe("deepseek-v4.1-flash-free")
+})
+
 test("DeepSeek V4 Pro 常态化采用特价", () => {
   const price = priceForModel("deepseek-v4-pro", Date.parse("2026-05-20T12:00:00+08:00"))
 

@@ -1,4 +1,4 @@
-export type DeepseekModelID = "deepseek-v4-flash" | "deepseek-v4-pro"
+export type DeepseekModelID = "deepseek-v4-flash" | "deepseek-flash" | "deepseek-v4-pro"
 
 export type KimiChinaModelID = "kimi-k2.5" | "kimi-k2.6"
 
@@ -36,6 +36,14 @@ export type TencentTokenHubModelID = "hy3-preview"
 export type OpenCodeModelID =
   | "big-pickle"
   | "deepseek-v4-flash-free"
+  | "deepseek-v4.1-flash-free"
+  | "glm-5.3-flash-free"
+  | "mimo-v2.6-flash-free"
+  | "nemotron-3.5-lightning-free"
+  | "nemotron-3.5-super-vl-free"
+  | "longcat-2.5-preview-free"
+  | "space-bunny-free"
+  | "beam-free"
   | "mimo-v2.5-free"
   | "nemotron-3-ultra-free"
   | "nemotron-3-super-free"
