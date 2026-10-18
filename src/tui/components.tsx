@@ -2,21 +2,40 @@ import type { RGBA } from "@opentui/core"
 import { createSignal, For, Match, Show, Switch } from "solid-js"
 import type { BalanceTrackedProvider, SessionCostSummary } from "../pricing.js"
 import { PLUGIN_NAME } from "../version.js"
-import { formatDetails, formatMoney, formatTime, formatTokens } from "./format.js"
+import { formatDetails, formatMoney, formatTime, formatTokens, truncateToWidth, visualWidth } from "./format.js"
 import { balanceTone, type BalanceState } from "./state.js"
 import type { Theme } from "./theme.js"
 
 
-export function Header(props: { theme: Theme; canRefresh: boolean; onRefresh: () => void }) {
+/** Shorter provider prefixes so model rows stay on one line in the narrow sidebar. */
+const PROVIDER_SHORT: Record<string, string> = {
+  "OpenCode Zen": "Zen",
+}
+
+export function providerShortName(label: string) {
+  return PROVIDER_SHORT[label] ?? label
+}
+
+export function Header(props: {
+  theme: Theme
+  open: boolean
+  onToggle: () => void
+  canRefresh: boolean
+  onRefresh: () => void
+  /** Right-aligned summary shown while collapsed. */
+  summaryText?: string
+}) {
   const [hovered, setHovered] = createSignal(false)
   const refreshHovered = () => props.canRefresh && hovered()
+  const summary = () => props.summaryText ?? ""
 
   return (
-    <box flexDirection="row" justifyContent="space-between">
-      <text fg={props.theme.text}>
-        <span style={{ fg: props.theme.primary }}>◆</span> <b>LLM CNY</b>
+    <box flexDirection="row" justifyContent="space-between" gap={1}>
+      <text fg={props.theme.text} selectable={false} onMouseUp={props.onToggle}>
+        {props.open ? "▼ " : "▶ "}
+        <b>LLM CNY</b>
       </text>
-      <Show when={props.canRefresh}>
+      <Show when={props.open && props.canRefresh}>
         <text
           fg={refreshHovered() ? props.theme.primary : props.theme.textMuted}
           bg={refreshHovered() ? props.theme.borderSubtle : undefined}
@@ -26,6 +45,11 @@ export function Header(props: { theme: Theme; canRefresh: boolean; onRefresh: ()
           onMouseDown={props.onRefresh}
         >
           {" 刷新 "}
+        </text>
+      </Show>
+      <Show when={!props.open && summary() !== ""}>
+        <text fg={props.theme.textMuted} selectable={false} onMouseUp={props.onToggle}>
+          {summary()}
         </text>
       </Show>
     </box>
@@ -48,15 +72,27 @@ export function UpdateBanner(props: {
   )
 }
 
-export function Summary(props: { theme: Theme; summary: SessionCostSummary; title?: string }) {
+export function Summary(props: { theme: Theme; summary: SessionCostSummary; title?: string; width?: number }) {
   const anthropicModels = () => props.summary.models.filter((item) => item.providerID === "anthropic")
   const cacheWrite1hTotal = () => props.summary.cacheWrite1hCostCny
   const hasAnthropicCacheWrite = () => anthropicModels().some((item) => item.cacheWrite1hCostCny > 0)
+  const modelValue = (item: SessionCostSummary["models"][number]) =>
+    `${item.turns} 次 · ${item.costCny === 0 ? "免费" : formatMoney(item.costCny)}`
+  const modelLabel = (item: SessionCostSummary["models"][number]) => {
+    const label = `${providerShortName(item.providerLabel)} ${item.modelLabel}`
+    const width = props.width ?? 0
+    if (width <= 0) return label
+    return truncateToWidth(label, width - visualWidth(modelValue(item)) - 1)
+  }
 
   return (
-    <box gap={1}>
-      <MetricRow theme={props.theme} label="费用" value={formatMoney(props.summary.costCny)} strong />
-      <MetricRow theme={props.theme} label="调用" value={`${props.summary.turns} 次`} />
+    <box gap={0}>
+      <MetricRow
+        theme={props.theme}
+        label="费用"
+        value={`${props.summary.costCny === 0 ? "免费" : formatMoney(props.summary.costCny)} · ${props.summary.turns} 次`}
+        strong
+      />
       <text fg={props.theme.textMuted}>
         输入 {formatTokens(props.summary.cacheMissInputTokens)} · 缓存 {formatTokens(props.summary.cacheHitInputTokens)}
       </text>
@@ -70,11 +106,11 @@ export function Summary(props: { theme: Theme; summary: SessionCostSummary; titl
       </Show>
       <For each={props.summary.models}>
         {(item) => (
-          <box>
+          <box gap={0}>
             <MetricRow
               theme={props.theme}
-              label={`${item.providerLabel} ${item.modelLabel}`}
-              value={`${item.turns} 次 · ${formatMoney(item.costCny)}`}
+              label={modelLabel(item)}
+              value={modelValue(item)}
             />
             <For each={item.warnings}>
               {(warning) => (
@@ -118,29 +154,30 @@ export function ProviderBalance(props: {
   const amount = () => (props.state.status === "ready" ? props.state.balance.amount : undefined)
   const tone = () => balanceTone(props.theme, amount())
 
+  const label = () => `余额 · ${props.provider.label}`
+
   return (
-    <box gap={1}>
-      <text fg={props.theme.textMuted}>余额 · {props.provider.label}</text>
+    <box gap={0}>
       <Switch>
         <Match when={props.state.status === "idle" || props.state.status === "loading"}>
-          <text fg={props.theme.textMuted}>正在读取余额...</text>
+          <MetricRow theme={props.theme} label={label()} value="正在读取..." />
         </Match>
         <Match when={props.state.status === "missing"}>
           <text fg={props.theme.warning} wrapMode="word">
-            未找到 {props.provider.label} API Key
+            {label()} 未找到 API Key
           </text>
         </Match>
         <Match when={props.state.status === "error"}>
           <text fg={props.theme.error} wrapMode="word">
-            {(props.state.status === "error" && props.state.message) || "余额读取失败"}
+            {label()} {props.state.status === "error" && props.state.message ? props.state.message : "读取失败"}
           </text>
         </Match>
         <Match when={props.state.status === "ready"}>
-          <box gap={1}>
+          <box gap={0}>
             <MetricRow
               theme={props.theme}
-              label={props.state.status === "ready" && props.state.balance.isAvailable ? "可用" : "不可用"}
-              value={`${props.state.status === "ready" ? props.state.balance.currency : "CNY"} ${props.state.status === "ready" ? props.state.balance.totalBalance : "0"
+              label={label()}
+              value={`${props.state.status === "ready" && !props.state.balance.isAvailable ? "不可用 " : ""}${props.state.status === "ready" ? props.state.balance.currency : "CNY"} ${props.state.status === "ready" ? props.state.balance.totalBalance : "0"
                 }`}
               color={tone()}
               strong
@@ -155,7 +192,7 @@ export function ProviderBalance(props: {
                 余额偏低，建议去 {props.provider.label} 控制台充值
               </text>
             </Show>
-            <text fg={props.theme.textMuted}>余额可能有5分钟延迟，可以手动点击刷新二字</text>
+            <text fg={props.theme.textMuted}>余额可能有5分钟延迟，可点击折叠展开后的刷新</text>
             <text fg={props.theme.textMuted}>
               {props.state.status === "ready" ? formatTime(props.state.updatedAt) : ""}
             </text>
@@ -185,6 +222,6 @@ export function MetricRow(props: {
   )
 }
 
-export function Divider(props: { theme: Theme }) {
-  return <text fg={props.theme.borderSubtle}>────────────────────────</text>
+export function Divider(props: { theme: Theme; width?: number }) {
+  return <text fg={props.theme.borderSubtle}>{"─".repeat(Math.max(1, props.width ?? 20))}</text>
 }

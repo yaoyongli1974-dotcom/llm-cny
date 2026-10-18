@@ -1,4 +1,5 @@
 /** @jsxImportSource @opentui/solid */
+import type { BoxRenderable } from "@opentui/core"
 import type { SessionMessageInfo } from "@opencode/client"
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
@@ -19,7 +20,7 @@ import {
 } from "./tui/components.js"
 import { CodexUsagePanel } from "./tui/codex-components.js"
 import { CopilotQuotaPanel } from "./tui/copilot-components.js"
-import { errorMessage } from "./tui/format.js"
+import { errorMessage, formatMoney } from "./tui/format.js"
 import { parseOptions, type Options } from "./tui/options.js"
 import { randomCodexRefreshMs } from "./tui/refresh.js"
 import {
@@ -98,6 +99,21 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
   const [usdCnyRate, setUsdCnyRate] = createSignal<number | undefined>()
   const summary = createMemo(() => calculateTrackedSession(usageRecords(costMessages()), { usdCnyRate: usdCnyRate() }))
   const visible = createMemo(() => props.options.showWhenEmpty || activated())
+  // Sidebar starts collapsed to keep the panel to a single line; click the header to expand.
+  const [open, setOpen] = createSignal(false)
+  const toggleOpen = () => setOpen((value) => !value)
+  const [panelWidth, setPanelWidth] = createSignal(0)
+  let boxEl: BoxRenderable | undefined
+  const measurePanel = () => {
+    const width = boxEl?.width ?? 0
+    if (width > 0) setPanelWidth(width)
+  }
+  const summaryText = createMemo(() => {
+    if (!activated()) return "未激活"
+    if (summary().turns === 0) return "已激活"
+    const cost = summary().costCny === 0 ? "免费" : formatMoney(summary().costCny)
+    return `${cost} · ${summary().turns} 次`
+  })
   const [updateVersion, setUpdateVersion] = createSignal<string | null>(null)
   const [updateBannerDismissed, setUpdateBannerDismissed] = createSignal(false)
   const showableUpdateVersion = createMemo(() => {
@@ -367,18 +383,12 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
 
   return (
     <Show when={visible()}>
-      <box
-        border
-        borderColor={theme().borderSubtle}
-        backgroundColor={theme().backgroundElement}
-        paddingTop={1}
-        paddingBottom={1}
-        paddingLeft={1}
-        paddingRight={1}
-        gap={1}
-      >
+      <box gap={0} ref={(el: BoxRenderable) => { boxEl = el }} onSizeChange={measurePanel}>
         <Header
           theme={theme()}
+          open={open()}
+          onToggle={toggleOpen}
+          summaryText={summaryText()}
           canRefresh={
             (hasTrackedUsage() && activeBalanceProviders().some((item) => tokens()[item.id] !== undefined)) ||
             codexEnabled() ||
@@ -402,34 +412,36 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
             />
           )}
         </Show>
-        <Show when={activated()} fallback={<ActivationPrompt theme={theme()} />}>
-          <Show when={hasTrackedUsage()}>
-            <Show when={summary().turns > 0} fallback={<EmptyUsage theme={theme()} />}>
-              <Summary theme={theme()} summary={summary()} title={session()?.title} />
-            </Show>
-            <Divider theme={theme()} />
-          </Show>
-          <Show when={codexEnabled()}>
-            <CodexUsagePanel theme={theme()} state={codexState()} />
-            <Show when={hasTrackedUsage() || copilotEnabled()}>
-              <Divider theme={theme()} />
-            </Show>
-          </Show>
-          <Show when={copilotEnabled()}>
-            <CopilotQuotaPanel theme={theme()} state={copilotState()} />
+        <Show when={open()}>
+          <Show when={activated()} fallback={<ActivationPrompt theme={theme()} />}>
             <Show when={hasTrackedUsage()}>
-              <Divider theme={theme()} />
+              <Show when={summary().turns > 0} fallback={<EmptyUsage theme={theme()} />}>
+                <Summary theme={theme()} summary={summary()} title={session()?.title} width={panelWidth()} />
+              </Show>
+              <Divider theme={theme()} width={panelWidth()} />
             </Show>
+            <Show when={codexEnabled()}>
+              <CodexUsagePanel theme={theme()} state={codexState()} />
+              <Show when={hasTrackedUsage() || copilotEnabled()}>
+                <Divider theme={theme()} width={panelWidth()} />
+              </Show>
+            </Show>
+            <Show when={copilotEnabled()}>
+              <CopilotQuotaPanel theme={theme()} state={copilotState()} />
+              <Show when={hasTrackedUsage()}>
+                <Divider theme={theme()} width={panelWidth()} />
+              </Show>
+            </Show>
+            <For each={activeBalanceProviders()}>
+              {(provider) => (
+                <ProviderBalance
+                  theme={theme()}
+                  provider={provider}
+                  state={balances()[provider.id] ?? { status: "idle" }}
+                />
+              )}
+            </For>
           </Show>
-          <For each={activeBalanceProviders()}>
-            {(provider) => (
-              <ProviderBalance
-                theme={theme()}
-                provider={provider}
-                state={balances()[provider.id] ?? { status: "idle" }}
-              />
-            )}
-          </For>
         </Show>
       </box>
     </Show>
