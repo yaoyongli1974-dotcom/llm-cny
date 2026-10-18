@@ -11,6 +11,11 @@ export function formatMoney(value: number) {
   return money.format(value)
 }
 
+/** Balance amounts are CNY in practice; other currencies keep their own symbol. */
+export function formatBalanceAmount(currency: string, amount: number) {
+  return currency === "CNY" ? formatMoney(amount) : `${currency} ${amount.toFixed(4)}`
+}
+
 export function formatTokens(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
@@ -59,6 +64,22 @@ export function visualWidth(value: string) {
     width += isWideCodePoint(char.codePointAt(0) ?? 0) ? 2 : 1
   }
   return width
+}
+
+/**
+ * Joins as many `parts` as fit into `max` display columns, keeping whole parts so a
+ * value is never cut in half. Only the first part is truncated when it alone overflows.
+ */
+export function fitParts(parts: readonly string[], max: number, separator = " · ") {
+  const kept: string[] = []
+  for (const part of parts) {
+    const candidate = [...kept, part].join(separator)
+    if (kept.length > 0 && visualWidth(candidate) > max) break
+    kept.push(part)
+  }
+
+  const text = kept.join(separator)
+  return visualWidth(text) > max ? truncateToWidth(text, max) : text
 }
 
 /** Cut `value` to `max` display columns, appending an ellipsis when shortened. */

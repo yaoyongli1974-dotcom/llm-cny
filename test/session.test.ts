@@ -5,7 +5,19 @@ import {
   hasCopilotUsage,
   hasOpenAIApiKeyProvider,
   hasOpenAIOAuthProvider,
+  providerTokens,
 } from "../src/tui/session.js"
+
+/** Runs `run` with DEEPSEEK_API_KEY removed so key discovery is deterministic. */
+function withoutDeepseekEnv<T>(run: () => T): T {
+  const previous = process.env.DEEPSEEK_API_KEY
+  delete process.env.DEEPSEEK_API_KEY
+  try {
+    return run()
+  } finally {
+    if (previous !== undefined) process.env.DEEPSEEK_API_KEY = previous
+  }
+}
 
 function assistantMessage(input: {
   providerID: string
@@ -176,4 +188,35 @@ test("用户切换到 Copilot 模型也会激活", () => {
   expect(
     hasCopilotUsage([modelSelected({ providerID: "github-copilot" })]),
   ).toBe(true)
+})
+
+test("providerTokens 使用 OpenCode 凭据文件里的 key 作兜底", () => {
+  withoutDeepseekEnv(() => {
+    expect(providerTokens([], undefined, { deepseek: "stored-key" }).deepseek).toBe("stored-key")
+  })
+})
+
+test("providerTokens 优先使用 provider 暴露的 key", () => {
+  withoutDeepseekEnv(() => {
+    const providers = [{ id: "deepseek", settings: { apiKey: "settings-key" } }]
+    expect(providerTokens(providers, undefined, { deepseek: "stored-key" }).deepseek).toBe("settings-key")
+  })
+})
+
+test("providerTokens 优先使用环境变量里的 key", () => {
+  const previous = process.env.DEEPSEEK_API_KEY
+  process.env.DEEPSEEK_API_KEY = "env-key"
+  try {
+    expect(providerTokens([], undefined, { deepseek: "stored-key" }).deepseek).toBe("env-key")
+  } finally {
+    if (previous === undefined) delete process.env.DEEPSEEK_API_KEY
+    else process.env.DEEPSEEK_API_KEY = previous
+  }
+})
+
+test("providerTokens 在没有任何来源时保持 undefined", () => {
+  withoutDeepseekEnv(() => {
+    expect(providerTokens([], undefined, {}).deepseek).toBeUndefined()
+    expect(providerTokens([]).deepseek).toBeUndefined()
+  })
 })

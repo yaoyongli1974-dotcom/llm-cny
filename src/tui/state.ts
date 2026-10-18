@@ -20,6 +20,38 @@ export type BalanceState =
 export type BalanceStateMap = Partial<Record<BalanceProviderID, BalanceState>>
 export type TrackedProvider = (typeof TRACKED_PROVIDERS)[number]
 
+export type BalanceTotal = {
+  /** Providers whose balance is included in the sum. */
+  counted: number
+  /** Providers that were asked for a balance. */
+  expected: number
+  total: number
+  currency: string
+}
+
+/**
+ * Sums ready provider balances. Providers still loading, missing a key or failed are
+ * skipped, and only the first currency seen is summed so mixed currencies never
+ * produce a meaningless number; `counted < expected` then marks the sum as partial.
+ */
+export function sumBalances(states: ReadonlyArray<BalanceState | undefined>): BalanceTotal {
+  const ready = states.filter(
+    (state): state is Extract<BalanceState, { status: "ready" }> => state?.status === "ready",
+  )
+  const amounts = ready
+    .map((state) => ({ amount: state.balance.amount, currency: state.balance.currency }))
+    .filter((item): item is { amount: number; currency: string } => item.amount !== undefined)
+  const currency = amounts[0]?.currency ?? "CNY"
+  const included = amounts.filter((item) => item.currency === currency)
+
+  return {
+    counted: included.length,
+    expected: states.length,
+    total: included.reduce((sum, item) => sum + item.amount, 0),
+    currency,
+  }
+}
+
 const orange = RGBA.fromInts(255, 135, 0)
 
 const LOW_BALANCE_CNY = 3

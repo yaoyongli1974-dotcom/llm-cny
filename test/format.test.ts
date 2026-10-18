@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { truncateToWidth, visualWidth } from "../src/tui/format.js"
+import { fitParts, formatBalanceAmount, truncateToWidth, visualWidth } from "../src/tui/format.js"
 
 test("visualWidth 把 ASCII 按 1 列计算", () => {
   expect(visualWidth("LLM CNY")).toBe(7)
@@ -25,4 +25,23 @@ test("truncateToWidth 保留双宽字符的列预算", () => {
   expect(truncateToWidth("免费模型很长很长", 7)).toBe("免费模…")
   expect(visualWidth(truncateToWidth("免费模型很长很长", 7))).toBeLessThanOrEqual(7)
   expect(truncateToWidth("任意文本", 0)).toBe("")
+})
+
+test("fitParts 只保留放得下的整段", () => {
+  const parts = ["¥0.0250", "余额 ¥41.8500", "9 次"]
+  expect(fitParts(parts, 27)).toBe("¥0.0250 · 余额 ¥41.8500")
+  expect(fitParts(parts, 34)).toBe("¥0.0250 · 余额 ¥41.8500 · 9 次")
+  expect(visualWidth(fitParts(parts, 27))).toBeLessThanOrEqual(27)
+})
+
+test("fitParts 放不下首段时才会截断", () => {
+  expect(fitParts(["费用 ¥0.0250"], 6)).toBe("费用…")
+  expect(fitParts(["费用 ¥0.0250"], 3)).toBe("费…")
+  expect(fitParts(["费用 ¥0.0250"], 2)).toBe("…")
+  expect(fitParts([], 10)).toBe("")
+})
+
+test("formatBalanceAmount 用人民币符号表示 CNY", () => {
+  expect(formatBalanceAmount("CNY", 41.85)).toBe("¥41.8500")
+  expect(formatBalanceAmount("USD", 1.5)).toBe("USD 1.5000")
 })

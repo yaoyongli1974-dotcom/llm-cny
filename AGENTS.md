@@ -34,7 +34,11 @@
   - `balance.test.ts`：余额查询解析。
   - `exchange-rate.test.ts`：汇率获取与缓存。
   - `refresh.test.ts`：刷新调度逻辑。
-  - `session.test.ts`：会话解析与费用计算。
+  - `session.test.ts`：会话解析、费用计算与 API Key 来源。
+  - `state.test.ts`：余额汇总。
+  - `oauth.test.ts`：OpenCode 凭据文件读取。
+  - `format.test.ts`：格式化与显示宽度工具。
+  - `codex-usage.test.ts`：Codex 限额解析。
   - `codex-usage.test.ts`：Codex 限额解析。
   - `codex-components.test.ts`：Codex 组件渲染逻辑。
   - `copilot-usage.test.ts`：Copilot 额度解析与格式化。

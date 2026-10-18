@@ -13,10 +13,14 @@ const PROVIDER_ENV: Record<string, readonly string[]> = {
   "github-copilot": ["GITHUB_TOKEN", "GH_TOKEN"],
 }
 
-export function providerTokens(providers: ReadonlyArray<ProviderInfoLike>, config?: unknown) {
+export function providerTokens(
+  providers: ReadonlyArray<ProviderInfoLike>,
+  config?: unknown,
+  storedKeys: Partial<Record<BalanceProviderID, string>> = {},
+) {
   const result: Partial<Record<BalanceProviderID, string>> = {}
   for (const provider of BALANCE_TRACKED_PROVIDERS) {
-    result[provider.id] = findProviderApiKey(providers, config, provider)
+    result[provider.id] = findProviderApiKey(providers, config, storedKeys, provider)
   }
   return result
 }
@@ -135,16 +139,19 @@ export function isSubagentSession(session: SessionInfo) {
 function findProviderApiKey(
   providers: ReadonlyArray<ProviderInfoLike>,
   config: unknown,
+  storedKeys: Partial<Record<BalanceProviderID, string>>,
   tracked: (typeof BALANCE_TRACKED_PROVIDERS)[number],
 ) {
   const provider = providers.find((item) => item.id === tracked.id)
-  const fromProvider = [
+  const sources = [
     readString(provider?.settings, "apiKey"),
     ...tracked.env.map((name) => process.env[name]),
     readProviderConfigApiKey(config, tracked.id),
-  ].find((item) => typeof item === "string" && item.trim() !== "")
+    // OpenCode keeps its own credentials outside the provider list; fall back to them last.
+    storedKeys[tracked.id],
+  ]
 
-  return fromProvider?.trim()
+  return sources.find((item) => typeof item === "string" && item.trim() !== "")?.trim()
 }
 
 function readProviderConfigApiKey(config: unknown, providerID: BalanceProviderID) {

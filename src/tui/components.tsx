@@ -2,7 +2,7 @@ import type { RGBA } from "@opentui/core"
 import { createSignal, For, Match, Show, Switch } from "solid-js"
 import type { BalanceTrackedProvider, SessionCostSummary } from "../pricing.js"
 import { PLUGIN_NAME } from "../version.js"
-import { formatDetails, formatMoney, formatTime, formatTokens, truncateToWidth, visualWidth } from "./format.js"
+import { formatBalanceAmount, formatDetails, formatMoney, formatTime, formatTokens, truncateToWidth, visualWidth } from "./format.js"
 import { balanceTone, type BalanceState } from "./state.js"
 import type { Theme } from "./theme.js"
 
@@ -146,6 +146,31 @@ export function EmptyUsage(props: { theme: Theme }) {
   )
 }
 
+/** Aggregate of every provider balance, shown above the per-provider rows. */
+export function TotalBalance(props: {
+  theme: Theme
+  total: number
+  currency: string
+  counted: number
+  expected: number
+}) {
+  const partial = () => props.counted < props.expected
+  const value = () => {
+    const amount = formatBalanceAmount(props.currency, props.total)
+    return partial() ? `${amount} · ${props.counted}/${props.expected}` : amount
+  }
+
+  return (
+    <MetricRow
+      theme={props.theme}
+      label="总余额"
+      value={value()}
+      color={balanceTone(props.theme, props.total)}
+      strong
+    />
+  )
+}
+
 export function ProviderBalance(props: {
   theme: Theme
   provider: BalanceTrackedProvider
@@ -192,7 +217,7 @@ export function ProviderBalance(props: {
                 余额偏低，建议去 {props.provider.label} 控制台充值
               </text>
             </Show>
-            <text fg={props.theme.textMuted}>余额可能有5分钟延迟，可点击折叠展开后的刷新</text>
+            <text fg={props.theme.textMuted}>余额延迟约5分钟，可点「刷新」更新</text>
             <text fg={props.theme.textMuted}>
               {props.state.status === "ready" ? formatTime(props.state.updatedAt) : ""}
             </text>

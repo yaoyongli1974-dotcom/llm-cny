@@ -8,7 +8,13 @@ import { fetchDisplayBalance } from "./balance.js"
 import { fetchCopilotUsage, type CopilotQuota } from "./copilot-usage.js"
 import { fetchCodexUsage, type CodexUsage } from "./codex-usage.js"
 import { fetchUsdCnyRate } from "./exchange-rate.js"
-import { calculateTrackedSession, supportsBalance, type BalanceProviderID } from "./pricing.js"
+import { readStoredProviderKeys } from "./oauth.js"
+import {
+  BALANCE_TRACKED_PROVIDERS,
+  calculateTrackedSession,
+  supportsBalance,
+  type BalanceProviderID,
+} from "./pricing.js"
 import {
   ActivationPrompt,
   Divider,
@@ -16,11 +22,12 @@ import {
   Header,
   ProviderBalance,
   Summary,
+  TotalBalance,
   UpdateBanner,
 } from "./tui/components.js"
 import { CodexUsagePanel } from "./tui/codex-components.js"
 import { CopilotQuotaPanel } from "./tui/copilot-components.js"
-import { errorMessage, formatMoney } from "./tui/format.js"
+import { errorMessage, fitParts, formatBalanceAmount, formatMoney, visualWidth } from "./tui/format.js"
 import { parseOptions, type Options } from "./tui/options.js"
 import { randomCodexRefreshMs } from "./tui/refresh.js"
 import {
@@ -38,7 +45,7 @@ import {
   usageRecords,
 } from "./tui/session.js"
 import { defaultStateDir } from "./tui/paths.js"
-import { tokenSignature, type BalanceState, type BalanceStateMap } from "./tui/state.js"
+import { sumBalances, tokenSignature, type BalanceState, type BalanceStateMap } from "./tui/state.js"
 import { themeFrom } from "./tui/theme.js"
 import { isNewerVersion, PLUGIN_NAME, PLUGIN_VERSION } from "./version.js"
 
@@ -63,6 +70,7 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
   const theme = createMemo(() => themeFrom(props.ctx.theme))
   const providers = createMemo(() => props.ctx.data.location.provider.list(props.ctx.location) ?? [])
   const [balances, setBalances] = createSignal<BalanceStateMap>({})
+  const [storedKeys, setStoredKeys] = createSignal<Partial<Record<BalanceProviderID, string>>>({})
   const [remoteChildMessages, setRemoteChildMessages] = createSignal<ReadonlyArray<SessionMessageInfo>>([])
   const session = createMemo(() => props.ctx.data.session.get(props.session_id))
   const messages = createMemo(() => props.ctx.data.session.message.list(props.session_id))
@@ -75,7 +83,7 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
   const costMessages = createMemo(() =>
     openAIApiKeyEnabled() ? usageMessages() : usageMessages().filter((item) => item.type !== "assistant" || item.model.providerID !== "openai"),
   )
-  const tokens = createMemo(() => providerTokens(providers()))
+  const tokens = createMemo(() => providerTokens(providers(), undefined, storedKeys()))
   const activeProviders = createMemo(() => activeTrackedProviders(costMessages()))
   const activeBalanceProviders = createMemo(() => activeProviders().filter(supportsBalance))
   const hasTrackedUsage = createMemo(() => activeProviders().length > 0)
@@ -108,11 +116,20 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
     const width = boxEl?.width ?? 0
     if (width > 0) setPanelWidth(width)
   }
+  const balanceTotal = createMemo(() =>
+    sumBalances(activeBalanceProviders().map((provider) => balances()[provider.id])),
+  )
   const summaryText = createMemo(() => {
     if (!activated()) return "未激活"
     if (summary().turns === 0) return "已激活"
-    const cost = summary().costCny === 0 ? "免费" : formatMoney(summary().costCny)
-    return `${cost} · ${summary().turns} 次`
+    const parts = [summary().costCny === 0 ? "免费" : formatMoney(summary().costCny)]
+    const total = balanceTotal()
+    if (total.counted > 0) parts.push(`余额 ${formatBalanceAmount(total.currency, total.total)}`)
+    parts.push(`${summary().turns} 次`)
+    const width = panelWidth()
+    if (width <= 0) return parts.join(" · ")
+    // Keep the collapsed row on one line; the turn count is the first thing dropped.
+    return fitParts(parts, Math.max(8, width - visualWidth("▶ LLM CNY") - 1))
   })
   const [updateVersion, setUpdateVersion] = createSignal<string | null>(null)
   const [updateBannerDismissed, setUpdateBannerDismissed] = createSignal(false)
@@ -193,6 +210,18 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
       setRemoteChildMessages(responses.flatMap((response) => response.data))
     } catch {
       if (request === childUsageRequest) setRemoteChildMessages([])
+    }
+  }
+
+  const refreshStoredKeys = async () => {
+    try {
+      const keys = await readStoredProviderKeys(
+        defaultStateDir(),
+        BALANCE_TRACKED_PROVIDERS.map((provider) => provider.id),
+      )
+      setStoredKeys(keys)
+    } catch {
+      // Keep the keys we already have when the credential store cannot be read.
     }
   }
 
@@ -358,7 +387,9 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
   })
 
   onMount(() => {
+    void refreshStoredKeys()
     const interval = setInterval(() => {
+      void refreshStoredKeys()
       if (activated()) refreshActive()
       if (needsUsdCnyRate()) refreshUsdCnyRate()
     }, props.options.balanceRefreshMs)
@@ -431,6 +462,15 @@ function View(props: { ctx: Context; options: Options; session_id: string }) {
               <Show when={hasTrackedUsage()}>
                 <Divider theme={theme()} width={panelWidth()} />
               </Show>
+            </Show>
+            <Show when={balanceTotal().counted > 0}>
+              <TotalBalance
+                theme={theme()}
+                total={balanceTotal().total}
+                currency={balanceTotal().currency}
+                counted={balanceTotal().counted}
+                expected={balanceTotal().expected}
+              />
             </Show>
             <For each={activeBalanceProviders()}>
               {(provider) => (

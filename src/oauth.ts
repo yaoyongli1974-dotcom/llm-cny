@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { isRecord } from "./utils.js"
 
 export function authCandidatePaths(stateDir: string) {
   const candidates = new Set<string>([join(stateDir, "account.json")])
@@ -36,6 +37,37 @@ export async function readOAuthCredential<T>(stateDir: string, parse: (value: un
   }
 
   return null
+}
+
+/**
+ * Reads the API key OpenCode stores for `providerID` (`auth.json` entries look like
+ * `{ "<providerID>": { "type": "api", "key": "..." } }`). OpenCode does not expose
+ * these keys through the provider list, so this is the only way to reach them.
+ */
+export function providerKeyFromAuth(value: unknown, providerID: string) {
+  if (!isRecord(value)) return undefined
+  const entry = value[providerID]
+  if (!isRecord(entry)) return undefined
+  const key = entry.key
+  if (typeof key !== "string") return undefined
+
+  const trimmed = key.trim()
+  return trimmed === "" ? undefined : trimmed
+}
+
+export async function readStoredProviderKeys<T extends string>(
+  stateDir: string,
+  providerIDs: readonly T[],
+): Promise<Partial<Record<T, string>>> {
+  const keys: Partial<Record<T, string>> = {}
+  await readOAuthCredential(stateDir, (value) => {
+    for (const providerID of providerIDs) {
+      const key = providerKeyFromAuth(value, providerID)
+      if (key !== undefined) keys[providerID] = key
+    }
+    return Object.keys(keys).length > 0 ? keys : null
+  })
+  return keys
 }
 
 export async function writeOAuthCredential(stateDir: string, update: (value: unknown) => unknown | null): Promise<boolean> {
